@@ -31,6 +31,41 @@ Pour visualiser les données dans Power BI :
 3. Power BI devrait détecter automatiquement les relations basées sur les clés (CustomerID, DateKey, LocationID, OperatorID). Sinon, configurez-les manuellement pour former une étoile autour de `fact_usage`.
 4. Utilisez la table `dim_date` pour les axes temporels et `dim_location` pour les cartes.
 
-## Validation des données
+## Guide de Test et de Validation
 
-Le script `validate_dwh.py` permet de vérifier l'intégrité des données produites (absence de doublons, de valeurs nulles et respect de l'intégrité référentielle).
+Pour garantir que le Data Warehouse est correctement construit et que les données sont fiables, suivez ces étapes :
+
+### 1. Installation des dépendances
+Assurez-vous d'avoir Python et la bibliothèque `pandas` installés :
+```bash
+pip install pandas
+```
+
+### 2. Exécution du pipeline ETL
+Lancez la transformation des données brutes en modèle en étoile :
+```bash
+python3 etl_pipeline.py
+```
+Vérifiez que le dossier `dwh/` a bien été créé et contient les 5 fichiers CSV.
+
+### 3. Lancement des tests de qualité
+Exécutez le script de validation pour vérifier l'intégrité des données (clés uniques, pas de valeurs nulles, intégrité référentielle) :
+```bash
+python3 validate_dwh.py
+```
+Si tout est correct, vous verrez le message : `ALL QUALITY CHECKS PASSED!`.
+
+### 4. Vérification manuelle (Optionnel)
+Vous pouvez inspecter les premières lignes des fichiers générés :
+```bash
+head -n 5 dwh/fact_usage.csv
+```
+
+## Visualisation avec Power BI
+
+Pour visualiser l'évolution de la consommation :
+1. Ouvrez Power BI Desktop.
+2. Cliquez sur **Obtenir des données** > **Texte/CSV**.
+3. Importez les fichiers de `dwh/` un par un.
+4. Allez dans la vue **Modèle** pour vérifier que `fact_usage` est relié aux dimensions par les IDs correspondants.
+5. Créez vos graphiques (ex: Consommation Data par Région, Churn par Opérateur, etc.).
