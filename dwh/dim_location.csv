@@ -1,0 +1,11 @@
+RegionName,AreaType,LocationID
+Littoral,Urban,1
+Nord-Ouest,Suburban,2
+Extrême-Nord,Rural,3
+Centre,Urban,4
+Sud-Ouest,Suburban,5
+Sud,Rural,6
+Ouest,Suburban,7
+Est,Rural,8
+Adamaoua,Rural,9
+Nord,Rural,10
