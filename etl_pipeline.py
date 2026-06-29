@@ -22,19 +22,15 @@ def run_etl():
     print("Cleaning and Transforming data...")
 
     # Clean customer_info
-    # Impute missing Age with median
     customer_info['Age'] = customer_info['Age'].fillna(customer_info['Age'].median())
-
-    # Correct negative MonthlyCharges
     customer_info.loc[customer_info['MonthlyCharges'] < 0, 'MonthlyCharges'] = customer_info['MonthlyCharges'].median()
 
     # Enrich: Assign Operators (Orange / MTN)
-    np.random.seed(42) # For reproducibility
+    np.random.seed(42)
     operators = ['Orange', 'MTN']
     customer_info['Operator'] = np.random.choice(operators, size=len(customer_info))
 
     # Enrich: Map generic regions to Cameroon regions
-    # We'll use a mapping or random assignment to specific Cameroon regions
     cameroon_regions = {
         'Urban': ['Littoral', 'Centre'],
         'Suburban': ['Ouest', 'Sud-Ouest', 'Nord-Ouest'],
@@ -59,17 +55,17 @@ def run_etl():
         'OperatorName': ['Orange', 'MTN']
     })
 
-    # Add OperatorID to customer_info for joining
-    op_map = {'Orange': 1, 'MTN': 2}
-    customer_info['OperatorID'] = customer_info['Operator'].map(op_map)
+    # dim_service
+    dim_service = pd.DataFrame({
+        'ServiceID': [1, 2, 3],
+        'ServiceName': ['Appels', 'Data', 'SMS'],
+        'Unit': ['Minutes', 'GB', 'Unités']
+    })
 
     # dim_location
     unique_locations = customer_info[['CameroonRegion', 'Region']].drop_duplicates().reset_index(drop=True)
     unique_locations['LocationID'] = unique_locations.index + 1
     dim_location = unique_locations.rename(columns={'CameroonRegion': 'RegionName', 'Region': 'AreaType'})
-
-    # Join LocationID back to customer_info
-    customer_info = customer_info.merge(unique_locations, on=['CameroonRegion', 'Region'])
 
     # dim_date
     usage_dates = pd.to_datetime(usage_data['Month']).unique()
@@ -82,33 +78,51 @@ def run_etl():
     dim_date['Year'] = dim_date['FullDate'].dt.year
 
     # 4. Create Fact Table
-    print("Creating Fact Table...")
+    print("Creating Fact Table (Pivoted by Service)...")
 
-    # Merge usage with customer info and churn
-    fact_usage = usage_data.merge(customer_info[['CustomerID', 'OperatorID', 'LocationID', 'MonthlyCharges']], on='CustomerID', how='left')
-    fact_usage = fact_usage.merge(churn_labels, on='CustomerID', how='left')
+    # Join customer_info with unique_locations to get LocationID
+    customer_info_with_loc = customer_info.merge(unique_locations, on=['CameroonRegion', 'Region'])
+
+    # Map OperatorID
+    op_map = {'Orange': 1, 'MTN': 2}
+    customer_info_with_loc['OperatorID'] = customer_info_with_loc['Operator'].map(op_map)
+
+    customer_ids_meta = customer_info_with_loc[['CustomerID', 'OperatorID', 'LocationID', 'MonthlyCharges']]
+
+    # Join usage with customer info meta and churn
+    temp_fact = usage_data.merge(customer_ids_meta, on='CustomerID', how='left')
+    temp_fact = temp_fact.merge(churn_labels, on='CustomerID', how='left')
 
     # Convert Month to DateKey
-    fact_usage['Month'] = pd.to_datetime(fact_usage['Month'])
-    fact_usage['DateKey'] = fact_usage['Month'].dt.strftime('%Y%m%d').astype(float) # float because of potential NaNs if dates don't match, will convert to int after handling
+    temp_fact['Month'] = pd.to_datetime(temp_fact['Month'])
+    temp_fact['DateKey'] = temp_fact['Month'].dt.strftime('%Y%m%d').astype(int)
+    temp_fact['Churn'] = temp_fact['Churn'].fillna(0).astype(int)
 
-    # Fill missing values if any
-    fact_usage['Churn'] = fact_usage['Churn'].fillna(0).astype(int)
+    # Melt (Pivot) usage metrics into long format
+    id_vars = ['DateKey', 'CustomerID', 'LocationID', 'OperatorID', 'MonthlyCharges', 'Complaints', 'Churn']
 
-    # Select columns for fact table
+    fact_usage = temp_fact.melt(
+        id_vars=id_vars,
+        value_vars=['CallMinutes', 'DataUsageGB', 'SMSCount'],
+        var_name='ServiceNameRaw',
+        value_name='UsageValue'
+    )
+
+    # Map ServiceNameRaw to ServiceID
+    service_map = {'CallMinutes': 1, 'DataUsageGB': 2, 'SMSCount': 3}
+    fact_usage['ServiceID'] = fact_usage['ServiceNameRaw'].map(service_map)
+
+    # Final column selection
     fact_usage = fact_usage[[
-        'DateKey', 'CustomerID', 'LocationID', 'OperatorID',
-        'CallMinutes', 'DataUsageGB', 'SMSCount', 'Complaints',
-        'MonthlyCharges', 'Churn'
+        'DateKey', 'CustomerID', 'LocationID', 'OperatorID', 'ServiceID',
+        'UsageValue', 'MonthlyCharges', 'Complaints', 'Churn'
     ]]
-
-    # Ensure DateKey is int
-    fact_usage['DateKey'] = fact_usage['DateKey'].astype(int)
 
     # 5. Load (Export to CSV)
     print("Exporting to CSV...")
     dim_customer.to_csv(os.path.join(DWH_DIR, 'dim_customer.csv'), index=False)
     dim_operator.to_csv(os.path.join(DWH_DIR, 'dim_operator.csv'), index=False)
+    dim_service.to_csv(os.path.join(DWH_DIR, 'dim_service.csv'), index=False)
     dim_location.to_csv(os.path.join(DWH_DIR, 'dim_location.csv'), index=False)
     dim_date.to_csv(os.path.join(DWH_DIR, 'dim_date.csv'), index=False)
     fact_usage.to_csv(os.path.join(DWH_DIR, 'fact_usage.csv'), index=False)
